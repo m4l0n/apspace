@@ -2,7 +2,6 @@ import aiohttp
 import aiohttp.web
 import asyncio
 from bs4 import BeautifulSoup
-import utils
 import logging
 import os
 import arrow
@@ -111,7 +110,8 @@ class APSpace:
         else:
             # Must catch this exception
             logger.error("APSpace Credentials Invalid!")
-            raise CredentialsInvalid(ticket_html.json()['authentication_exceptions'][1][0])
+            ticket_json = await ticket_html.json()
+            raise CredentialsInvalid(ticket_json['authentication_exceptions'][1][0])
 
     async def load_details(self):
         self.intake = await self.get_intake_details("current_intake")
@@ -149,18 +149,18 @@ class APSpace:
             'x-api-key': API_KEY
         })
         otp_response = await self.session.post("https://attendix.apu.edu.my/graphql", json = payload, headers = headers)
+        otp_json = await otp_response.json()
         if otp_response.status == 200:
-            otp_response = await otp_response.json()
-            if (otp_response['data'] == "null" or not otp_response['data']):
-                logger.error(otp_response['errors'][0]['message'])
-                raise OTPError(otp_response['errors'][0]['message'])
+            if (otp_json['data'] == "null" or not otp_json['data']):
+                logger.error(otp_json['errors'][0]['message'])
+                raise OTPError(otp_json['errors'][0]['message'])
             else:
-                if (otp_response['data']['updateAttendance']['attendance'] == "Y"):
+                if (otp_json['data']['updateAttendance']['attendance'] == "Y"):
                     logger.info("Successfully signed attendance!")
-                    class_code = otp_response['data']['updateAttendance']['classcode']
+                    class_code = otp_json['data']['updateAttendance']['classcode']
                     return class_code
         elif otp_response.status == 401:
-            print(await otp_response.json()['errors'][0]['message'])
+            print(otp_json['errors'][0]['message'])
 
     async def get_attendance_percentage(self) -> float:
         """
@@ -201,7 +201,8 @@ class APSpace:
         response = await self.session.get(sub_and_course_url)
         if response.status == 200:
             logger.debug("Request for semester details sucessful!")
-            temp = len(await response.json())
+            sub_and_course_details = await response.json()
+            temp = len(sub_and_course_details)
             match temp:
                 case 1:
                     self.current_semester = 1
@@ -212,7 +213,7 @@ class APSpace:
                         cgpa = 0.00
                 case 2:
                     self.current_semester = 2
-                    cgpa = await response.json()[-2]['IMMIGRATION_GPA']
+                    cgpa = sub_and_course_details[-2]['IMMIGRATION_GPA']
             return self.current_semester, cgpa
         elif response.status == 401:
             logger.error("APSpace Auth Ticket is invalid!")
@@ -330,7 +331,7 @@ async def main():
     apspace_session = APSpace()
     await apspace_session.login('credentials')
     try:
-        print(await apspace_session.sign_otp(111))
+        print(await apspace_session.get_semester_details())
     except OTPError as e:
         print(e.message)
     finally:
